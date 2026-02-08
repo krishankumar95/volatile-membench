@@ -15,25 +15,45 @@
 
 /* Buffer sizes for latency sweep (when no --size given) */
 static const size_t DEFAULT_LATENCY_SIZES[] = {
-    4 * 1024,           /*   4 KB (L1) */
-    32 * 1024,          /*  32 KB (L1) */
-    256 * 1024,         /* 256 KB (L2) */
-    4 * 1024 * 1024,    /*   4 MB (L3) */
-    32 * 1024 * 1024,   /*  32 MB (L3) */
+    16 * 1024,          /*  16 KB (L1)  */
+    32 * 1024,          /*  32 KB (L1)  */
+    128 * 1024,         /* 128 KB (L2)  */
+    512 * 1024,         /* 512 KB (L2)  */
+    4 * 1024 * 1024,    /*   4 MB (L3)  */
+    32 * 1024 * 1024,   /*  32 MB (L3)  */
+    64 * 1024 * 1024,   /*  64 MB (DRAM) */
     256 * 1024 * 1024,  /* 256 MB (DRAM) */
 };
 #define NUM_DEFAULT_LATENCY_SIZES \
     (sizeof(DEFAULT_LATENCY_SIZES) / sizeof(DEFAULT_LATENCY_SIZES[0]))
 
 static const size_t DEFAULT_BW_SIZES[] = {
-    64 * 1024 * 1024,   /*  64 MB */
-    256 * 1024 * 1024,  /* 256 MB */
+    16 * 1024,          /*  16 KB (L1)  */
+    32 * 1024,          /*  32 KB (L1)  */
+    128 * 1024,         /* 128 KB (L2)  */
+    512 * 1024,         /* 512 KB (L2)  */
+    4 * 1024 * 1024,    /*   4 MB (L3)  */
+    32 * 1024 * 1024,   /*  32 MB (L3)  */
+    64 * 1024 * 1024,   /*  64 MB (DRAM) */
+    256 * 1024 * 1024,  /* 256 MB (DRAM) */
 };
 #define NUM_DEFAULT_BW_SIZES \
     (sizeof(DEFAULT_BW_SIZES) / sizeof(DEFAULT_BW_SIZES[0]))
 
-static const size_t DEFAULT_GPU_BW_SIZE = 256 * 1024 * 1024; /* 256 MB */
-static const size_t DEFAULT_GPU_LAT_SIZE = 4 * 1024 * 1024;  /*   4 MB */
+static const size_t DEFAULT_GPU_BW_SIZES[] = {
+    1  * 1024 * 1024,   /*   1 MB */
+    16 * 1024 * 1024,   /*  16 MB */
+    256 * 1024 * 1024,  /* 256 MB */
+};
+#define NUM_DEFAULT_GPU_BW_SIZES \
+    (sizeof(DEFAULT_GPU_BW_SIZES) / sizeof(DEFAULT_GPU_BW_SIZES[0]))
+static const size_t DEFAULT_GPU_LAT_SIZES[] = {
+    1  * 1024 * 1024,   /*   1 MB */
+    4  * 1024 * 1024,   /*   4 MB */
+    32 * 1024 * 1024,   /*  32 MB (VRAM) */
+};
+#define NUM_DEFAULT_GPU_LAT_SIZES \
+    (sizeof(DEFAULT_GPU_LAT_SIZES) / sizeof(DEFAULT_GPU_LAT_SIZES[0]))
 
 /* Auto-pick iterations: target ~200ms per measurement */
 static uint64_t auto_iter(size_t buffer_size, int is_latency) {
@@ -144,32 +164,54 @@ static int run_gpu(const membench_options_t *opts) {
     }
     membench_print_gpu_info(&ginfo, opts->format);
 
-    size_t lat_size = opts->buffer_size ? opts->buffer_size : DEFAULT_GPU_LAT_SIZE;
-    size_t bw_size  = opts->buffer_size ? opts->buffer_size : DEFAULT_GPU_BW_SIZE;
-    uint64_t iters  = opts->iterations ? opts->iterations : 100;
+    size_t bw_size  = opts->buffer_size ? opts->buffer_size : DEFAULT_GPU_BW_SIZES[NUM_DEFAULT_GPU_BW_SIZES - 1];
+    uint64_t iters  = opts->iterations ? opts->iterations : 10;
 
     if (opts->tests & MEMBENCH_TEST_LATENCY) {
         printf("\n=== GPU Read Latency ===\n");
-        membench_gpu_latency_result_t r = {0};
-        if (membench_gpu_read_latency(dev, lat_size, iters, &r) == 0) {
-            membench_print_gpu_latency(&r, "GPU Read Latency", opts->format);
+        if (opts->buffer_size) {
+            membench_gpu_latency_result_t r = {0};
+            if (membench_gpu_read_latency(dev, opts->buffer_size, iters, &r) == 0) {
+                membench_print_gpu_latency(&r, "GPU Read Latency", opts->format);
+            }
+        } else {
+            for (size_t i = 0; i < NUM_DEFAULT_GPU_LAT_SIZES; i++) {
+                membench_gpu_latency_result_t r = {0};
+                if (membench_gpu_read_latency(dev, DEFAULT_GPU_LAT_SIZES[i], iters, &r) == 0) {
+                    membench_print_gpu_latency(&r, "GPU Read Latency", opts->format);
+                }
+            }
         }
     }
 
     if (opts->tests & MEMBENCH_TEST_BANDWIDTH) {
         printf("\n=== GPU Read Bandwidth ===\n");
-        {
+        if (opts->buffer_size) {
             membench_gpu_bandwidth_result_t r = {0};
             if (membench_gpu_read_bandwidth(dev, bw_size, iters, &r) == 0) {
                 membench_print_gpu_bandwidth(&r, "GPU Read BW", opts->format);
             }
+        } else {
+            for (size_t i = 0; i < NUM_DEFAULT_GPU_BW_SIZES; i++) {
+                membench_gpu_bandwidth_result_t r = {0};
+                if (membench_gpu_read_bandwidth(dev, DEFAULT_GPU_BW_SIZES[i], iters, &r) == 0) {
+                    membench_print_gpu_bandwidth(&r, "GPU Read BW", opts->format);
+                }
+            }
         }
 
         printf("\n=== GPU Write Bandwidth ===\n");
-        {
+        if (opts->buffer_size) {
             membench_gpu_bandwidth_result_t r = {0};
             if (membench_gpu_write_bandwidth(dev, bw_size, iters, &r) == 0) {
                 membench_print_gpu_bandwidth(&r, "GPU Write BW", opts->format);
+            }
+        } else {
+            for (size_t i = 0; i < NUM_DEFAULT_GPU_BW_SIZES; i++) {
+                membench_gpu_bandwidth_result_t r = {0};
+                if (membench_gpu_write_bandwidth(dev, DEFAULT_GPU_BW_SIZES[i], iters, &r) == 0) {
+                    membench_print_gpu_bandwidth(&r, "GPU Write BW", opts->format);
+                }
             }
         }
     }
