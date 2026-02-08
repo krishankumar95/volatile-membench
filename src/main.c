@@ -28,22 +28,30 @@ static const size_t DEFAULT_LATENCY_SIZES[] = {
     (sizeof(DEFAULT_LATENCY_SIZES) / sizeof(DEFAULT_LATENCY_SIZES[0]))
 
 static const size_t DEFAULT_BW_SIZES[] = {
-    16 * 1024,          /*  16 KB (L1)  */
-    32 * 1024,          /*  32 KB (L1)  */
-    128 * 1024,         /* 128 KB (L2)  */
-    512 * 1024,         /* 512 KB (L2)  */
-    4 * 1024 * 1024,    /*   4 MB (L3)  */
-    32 * 1024 * 1024,   /*  32 MB (L3)  */
-    64 * 1024 * 1024,   /*  64 MB (DRAM) */
-    256 * 1024 * 1024,  /* 256 MB (DRAM) */
+    16 * 1024,                /*  16 KB (L1)  */
+    32 * 1024,                /*  32 KB (L1)  */
+    128 * 1024,               /* 128 KB (L2)  */
+    512 * 1024,               /* 512 KB (L2)  */
+    4 * 1024 * 1024,          /*   4 MB (L3)  */
+    32 * 1024 * 1024,         /*  32 MB (L3)  */
+    64 * 1024 * 1024,         /*  64 MB (DRAM) */
+    256 * 1024 * 1024,        /* 256 MB (DRAM) */
+    (size_t)1024 * 1024 * 1024,       /*   1 GB (DRAM) */
+    (size_t)4 * 1024 * 1024 * 1024,   /*   4 GB (DRAM) */
+    (size_t)8 * 1024 * 1024 * 1024,   /*   8 GB (DRAM) */
+    (size_t)10 * 1024 * 1024 * 1024,  /*  10 GB (DRAM) */
 };
 #define NUM_DEFAULT_BW_SIZES \
     (sizeof(DEFAULT_BW_SIZES) / sizeof(DEFAULT_BW_SIZES[0]))
 
 static const size_t DEFAULT_GPU_BW_SIZES[] = {
-    1  * 1024 * 1024,   /*   1 MB */
-    16 * 1024 * 1024,   /*  16 MB */
-    256 * 1024 * 1024,  /* 256 MB */
+    1  * 1024 * 1024,                  /*   1 MB  */
+    16 * 1024 * 1024,                  /*  16 MB  */
+    256 * 1024 * 1024,                 /* 256 MB  */
+    (size_t)1024 * 1024 * 1024,        /*   1 GB  */
+    (size_t)4 * 1024 * 1024 * 1024,    /*   4 GB  */
+    (size_t)8 * 1024 * 1024 * 1024,    /*   8 GB  */
+    (size_t)10 * 1024 * 1024 * 1024,   /*  10 GB  */
 };
 #define NUM_DEFAULT_GPU_BW_SIZES \
     (sizeof(DEFAULT_GPU_BW_SIZES) / sizeof(DEFAULT_GPU_BW_SIZES[0]))
