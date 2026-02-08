@@ -114,6 +114,11 @@ volatile-membench/
 └── CMakeLists.txt
 ```
 
+## TBD
+- Validate extensively by building and running on Linux,Mac as well
+- Layer a cross platform UI
+
+
 ## License
 
 Open source — see LICENSE file.
