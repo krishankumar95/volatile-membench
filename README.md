@@ -116,4 +116,6 @@ volatile-membench/
 
 ## License
 
-Open source — see LICENSE file.
+Open source — see LICENSE file. 
+
+Built with Opus 4.6 ; pitfalls have been catalogued in key learnings and where patched by corrective nudging. 
