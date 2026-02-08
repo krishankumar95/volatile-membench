@@ -1,0 +1,23 @@
+# Following are the requirement for the first version of the product
+
+## Application Name : "Volatile MemBench"
+
+## High Level Goal : Create a benchmarking tool to evaluate volatile memory performance 
+
+## Requirements : 
+- The tool should be able to run on different platforms (Linux, Windows, MacOS)
+- It should support various types of volatile memory (DRAM, SRAM, etc.)
+- The tool should provide detailed performance metrics (latency, bandwidth, etc.)
+- Intially, the tool will be command line based 
+- The tool should be able to target various architectures (x86, ARM, etc.)
+- The tool should be open source and easily extensible for future enhancements
+- The tool should be able to target SRAM (L1,L2,L3,3D-Cache) and DRAM (DDR4, DDR5, LPDDR4, LPDDR5) memory types
+- The tool should be able to also target DRAM on GPUs if a dedicated GPU is present in the system (NVIDIA, AMD, etc.)
+
+## Testing and Validation :
+- Currently this machine is Windows based platform with AMD Ryzen 5800X-3D and 64GB DDR4 RAM along with Nvidia RTX 5080 GPU. Additionally WSL 2.0 installed.
+- So the tool can be tested aginst both WSL and Native Windows
+- My other machine is a M1 Macbook Air with 8GB RAM, so the tool can also be tested on MacOS platform
+
+## Future Enhancements :
+- Develop a graphical user interface (GUI) for easier interaction
