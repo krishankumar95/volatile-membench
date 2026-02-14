@@ -19,6 +19,11 @@ Lessons from building a memory benchmarking tool, written for computer scientist
 11. [Signal Processing on Hardware Data](#11-signal-processing-on-hardware-data)
 12. [Real Hardware Has Gradual Transitions](#12-real-hardware-has-gradual-transitions)
 13. [Practical Takeaways for Software Engineers](#13-practical-takeaways-for-software-engineers)
+14. [CPU Frequency Scaling Distorts First Measurements](#14-cpu-frequency-scaling-distorts-first-measurements)
+15. [Apple Silicon Is a Different Architecture](#15-apple-silicon-is-a-different-architecture)
+16. [Cache Line Size Is Not Universal](#16-cache-line-size-is-not-universal)
+17. [OS APIs Lie About Cache Sizes](#17-os-apis-lie-about-cache-sizes)
+18. [Benchmarking on Low-RAM Systems](#18-benchmarking-on-low-ram-systems)
 
 ---
 
@@ -504,6 +509,248 @@ Every level filters most accesses. The goal of cache-friendly code is to maximiz
 - **Temporal locality**: Access the same data repeatedly before moving on.
 - **Spatial locality**: Access nearby addresses (same cache line, adjacent lines).
 - **Minimal footprint**: Use the smallest data representation that works.
+
+---
+
+## 14. CPU Frequency Scaling Distorts First Measurements
+
+### The 3× Inflation Bug
+
+When porting to Apple M1, the first benchmark (read latency) measured **2.86 ns** at 16 KB — but the same function called later during cache detection measured **0.94 ns** for the same buffer size. Write latency (which ran second) also showed 0.94 ns.
+
+**Root cause**: Modern CPUs dynamically scale clock frequency based on load. The M1's P-cores can run from ~600 MHz to 3.2 GHz. When the benchmark starts after an idle period, the CPU is in a low-power state:
+
+```
+First measurement:    3 cycles @ ~1.05 GHz = 2.86 ns   ← CPU still waking up
+Second measurement:   3 cycles @ ~3.20 GHz = 0.94 ns   ← CPU at full speed
+```
+
+The warmup phase (one traversal of 256 nodes ≈ 240 ns of work) was far too short to trigger frequency ramp-up. The CPU needs sustained load (~100+ ms) before reaching peak frequency.
+
+### Evidence of Progressive Ramp-Up
+
+The read latency sweep ran sequentially through 8 sizes. The first few showed decreasing latency — not because larger buffers are faster, but because the CPU was ramping up:
+
+```
+16 KB:  2.86 ns   (CPU @ ~1.05 GHz — just starting)
+32 KB:  2.55 ns   (CPU @ ~1.18 GHz — warming up)
+128 KB: 2.34 ns   (CPU @ ~1.28 GHz — still ramping)
+```
+
+After fixing (adding 200 ms warmup), all three measured 0.94–0.97 ns, as expected for L1.
+
+### The Fix: Pre-Benchmark Frequency Warmup
+
+```c
+static void cpu_freq_warmup(void) {
+    uint64_t start = membench_timer_ns();
+    volatile uint64_t sink = 0;
+    while (membench_timer_ns() - start < 200000000ULL) { /* 200 ms */
+        for (int i = 0; i < 10000; i++)
+            sink += (uint64_t)i * 37;
+    }
+    (void)sink;
+}
+```
+
+A 200 ms busy-loop before any benchmark ensures the CPU is at peak frequency. This is called once at startup, not per-test.
+
+### Lesson
+
+**Always stabilize CPU frequency before benchmarking.** This affects ARM (Apple Silicon, Qualcomm) and x86 (Intel SpeedStep, AMD Cool'n'Quiet) alike. The pattern is insidious because:
+- Each individual measurement looks plausible (2.86 ns is a "reasonable" number).
+- The bug only appears when comparing against an independent measurement of the same thing.
+- Per-test warmup is insufficient — the CPU needs sustained load (hundreds of milliseconds) to reach peak frequency.
+
+Linux users can alternatively set the performance governor (`cpufreq-set -g performance`), but a software warmup is the only portable solution.
+
+---
+
+## 15. Apple Silicon Is a Different Architecture
+
+### big.LITTLE Heterogeneous Cores
+
+Apple M1 has two types of CPU cores with fundamentally different performance characteristics:
+
+| Property | P-core (Firestorm) | E-core (Icestorm) |
+|----------|-------------------|-------------------|
+| Clock | 3.2 GHz | 2.06 GHz |
+| L1d | 128 KB | 64 KB |
+| L2 | 12 MB (shared, 4P-cores) | 4 MB (shared, 4E-cores) |
+| L3 | None | None |
+| Decode width | 8-wide | 4-wide |
+
+A benchmark running on an E-core will show ~50% higher latency and different cache boundaries than one on a P-core. macOS schedules threads based on QoS class, not explicit affinity — there is no `sched_setaffinity` on macOS.
+
+**Fix**: Set QoS class to `QOS_CLASS_USER_INTERACTIVE` before latency-sensitive benchmarks:
+
+```c
+#if defined(MEMBENCH_PLATFORM_MACOS)
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+```
+
+This strongly encourages (but does not guarantee) P-core scheduling.
+
+### No L3, But a System Level Cache (SLC)
+
+Unlike x86 CPUs, the M1 has no traditional L3 cache. Instead, it has a ~16 MB System Level Cache (SLC) that sits between the memory controller and all requestors (CPU, GPU, Neural Engine, ISP). The SLC is not CPU-addressable in the same way as L3 — it acts more like a victim cache for the memory fabric.
+
+**Measured impact**: After spilling out of L2 (12 MB), latency jumps directly to DRAM levels (~90 ns). There is no intermediate "L3" plateau as seen on x86:
+
+```
+AMD 5800X3D:    L1 (0.9 ns) → L2 (3 ns) → L3 (13 ns, holds to 96 MB) → DRAM (52 ns)
+Apple M1:       L1 (0.95 ns) → L2 (5.5 ns) → DRAM (90+ ns, no L3 buffer)
+```
+
+For workloads with 12–96 MB working sets, the M1 is **7× slower per access** than a V-Cache-equipped x86 chip.
+
+### DRAM Trade-offs: Bandwidth vs. Latency
+
+M1 uses LPDDR4X in a unified memory architecture:
+
+```
+M1 LPDDR4X:    Read BW: 56 GB/s    Latency: 104 ns
+5800X3D DDR4:  Read BW: 28 GB/s    Latency:  52 ns
+```
+
+Apple optimized for **bandwidth** (2× higher) at the cost of **latency** (2× higher). This is the right trade-off for a GPU-integrated SoC (GPU workloads are bandwidth-bound), but hurts CPU pointer-chasing workloads.
+
+### Read/Write Bandwidth Symmetry
+
+Unlike Zen 3's ~25–40% read/write gap, M1 shows nearly symmetric bandwidth:
+
+```
+M1:     Read 56 GB/s, Write 59 GB/s  (ratio: 0.95)
+5800X3D: Read 28 GB/s, Write 21 GB/s (ratio: 1.33)
+```
+
+Apple's memory controller handles writes more efficiently, likely due to the unified memory architecture avoiding the CPU-side write-combining bottleneck seen in discrete DDR controllers.
+
+---
+
+## 16. Cache Line Size Is Not Universal
+
+### The 64-Byte Assumption Is Wrong on Apple Silicon
+
+The original benchmark hardcoded `CACHE_LINE_BYTES = 64`, which is correct for x86_64. On Apple Silicon, the cache line size is **128 bytes** (`sysctl hw.cachelinesize` returns 128).
+
+With a 64-byte pointer-chase stride on a 128-byte-line system, two adjacent nodes occupy the same cache line. In a random permutation, the probability that consecutive-in-chain nodes share a line is low (~1/N), so the direct impact on small-buffer latency is minimal. However, for large buffers where cache misses dominate, a 64-byte stride means:
+
+- Each cache miss fetches 128 bytes but only uses 64 → 50% of fetched data is wasted.
+- The effective number of cache lines touched is halved, artificially improving hit rates.
+- Bandwidth measurements overcount by up to 2× (streaming 64 bytes per access but the bus transfers 128).
+
+### The Fix: Runtime Detection
+
+```c
+static size_t membench_get_cache_line_size(void) {
+#if defined(MEMBENCH_PLATFORM_MACOS)
+    size_t line = 0, sz = sizeof(line);
+    if (sysctlbyname("hw.cachelinesize", &line, &sz, NULL, 0) == 0 && line > 0)
+        return line;
+#endif
+    return 64;  /* x86_64 default */
+}
+```
+
+The latency benchmark now spaces pointer-chase nodes one actual cache line apart, ensuring each dereference fetches a unique line regardless of architecture.
+
+### Lesson
+
+**Never hardcode microarchitectural constants.** Cache line sizes vary: 64 bytes (x86), 128 bytes (Apple Silicon), 32 bytes (some embedded ARM). Page sizes also vary (4 KB vs 16 KB on Apple Silicon). Detect at runtime or via build-system probing.
+
+---
+
+## 17. OS APIs Lie About Cache Sizes
+
+### macOS Reports E-Core Values by Default
+
+On Apple M1, the standard `sysctl` keys return **E-core** cache sizes:
+
+```
+hw.l1dcachesize = 65536    (64 KB — E-core L1d)
+hw.l2cachesize  = 4194304  (4 MB — E-core cluster L2)
+```
+
+The P-core values are larger:
+
+```
+hw.perflevel0.l1dcachesize = 131072     (128 KB — P-core L1d)
+hw.perflevel0.l2cachesize  = 12582912   (12 MB — P-core cluster L2)
+```
+
+And the E-core values match the "generic" ones:
+
+```
+hw.perflevel1.l1dcachesize = 65536      (64 KB — E-core L1d)
+hw.perflevel1.l2cachesize  = 4194304    (4 MB — E-core cluster L2)
+```
+
+If you report "L1 = 64 KB" to the user while running benchmarks on a P-core with 128 KB L1, the cache detection results appear to overshoot by 2× — creating false doubt in the tool's accuracy.
+
+### The Fix
+
+Prefer `hw.perflevel0.*` (P-core) values when available, falling back to the generic keys:
+
+```c
+if (sysctlbyname("hw.perflevel0.l1dcachesize", &val, &sz, NULL, 0) != 0 || val == 0) {
+    sysctlbyname("hw.l1dcachesize", &val, &sz, NULL, 0);  /* fallback */
+}
+```
+
+This is correct because benchmarks should reference the core type they're actually running on, and QoS hints push benchmark threads to P-cores.
+
+### Lesson
+
+**OS-reported cache sizes may not match the core you're running on.** On heterogeneous (big.LITTLE) systems, always query per-performance-level values. This applies to Apple Silicon, Qualcomm Snapdragon (Cortex-A7xx + Cortex-A5xx), and Intel Alder Lake+ (P-cores + E-cores with different L2 sizes).
+
+---
+
+## 18. Benchmarking on Low-RAM Systems
+
+### The Swap Cliff
+
+On an 8 GB MacBook Air, the original default bandwidth sweep went up to 10 GB:
+
+```
+Buffer Size    Read BW
+256 MB         55.46 GB/s   ← real DRAM bandwidth
+1 GB           49.50 GB/s   ← still DRAM (but system under pressure)
+4 GB            3.32 GB/s   ← measuring swap, not DRAM
+8 GB            3.43 GB/s   ← mostly swapping
+10 GB           3.39 GB/s   ← entirely swapping
+```
+
+At 4 GB (50% of physical RAM), macOS starts aggressively swapping to reclaim pages for the system. The "bandwidth" measured is SSD throughput (~3.4 GB/s on the M1's NVMe controller), not memory bandwidth.
+
+### Why 75% Is Still Too High
+
+Even 75% of RAM can cause issues. macOS, Windows, and Linux all reserve 2–4 GB for system processes, kernel caches, and file system buffers. On an 8 GB system:
+
+- 75% = 6 GB → leaves 2 GB for the OS → marginal
+- 50% = 4 GB → leaves 4 GB for the OS → safe
+
+### The Fix
+
+Skip default sweep sizes ≥ 50% of physical RAM:
+
+```c
+membench_sysinfo_t si = {0};
+membench_sysinfo_get(&si);
+size_t ram_limit = si.total_ram > 0 ? si.total_ram / 2 : (size_t)-1;
+
+if (DEFAULT_BW_SIZES[i] >= ram_limit) {
+    printf("  (skipping — exceeds 50%% of RAM)\n");
+    break;
+}
+```
+
+Users can still explicitly request large sizes via `--size 8G` if they know their system can handle it.
+
+### Lesson
+
+**Benchmark defaults must adapt to the target system.** A benchmark designed on a 64 GB workstation will produce garbage results on an 8 GB laptop if it doesn't check available memory. This is especially important for CI/CD environments where benchmark tests may run on constrained VMs.
 
 ---
 
