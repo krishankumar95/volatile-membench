@@ -180,12 +180,30 @@ int membench_sysinfo_get(membench_sysinfo_t *info) {
         info->num_cores_physical = ncpu;
     }
     {
-        size_t val = 0, sz = sizeof(val);
-        sysctlbyname("hw.l1dcachesize", &val, &sz, NULL, 0);
+        /* Prefer P-core (perflevel0) cache sizes on Apple Silicon, since
+         * benchmarks target high-performance cores.  Fall back to generic
+         * hw.l{1,2,3}cachesize which may report E-core values. */
+        size_t val = 0, sz;
+
+        sz = sizeof(val); val = 0;
+        if (sysctlbyname("hw.perflevel0.l1dcachesize", &val, &sz, NULL, 0) != 0 || val == 0) {
+            sz = sizeof(val);
+            sysctlbyname("hw.l1dcachesize", &val, &sz, NULL, 0);
+        }
         info->l1_data_cache = val;
-        sysctlbyname("hw.l2cachesize", &val, &sz, NULL, 0);
+
+        sz = sizeof(val); val = 0;
+        if (sysctlbyname("hw.perflevel0.l2cachesize", &val, &sz, NULL, 0) != 0 || val == 0) {
+            sz = sizeof(val);
+            sysctlbyname("hw.l2cachesize", &val, &sz, NULL, 0);
+        }
         info->l2_cache = val;
-        sysctlbyname("hw.l3cachesize", &val, &sz, NULL, 0);
+
+        sz = sizeof(val); val = 0;
+        if (sysctlbyname("hw.perflevel0.l3cachesize", &val, &sz, NULL, 0) != 0 || val == 0) {
+            sz = sizeof(val);
+            sysctlbyname("hw.l3cachesize", &val, &sz, NULL, 0);
+        }
         info->l3_cache = val;
     }
     {

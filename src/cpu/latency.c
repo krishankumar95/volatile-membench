@@ -21,9 +21,27 @@
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
 
-#define CACHE_LINE_BYTES 64
+/**
+ * Default cache line size (x86_64). On Apple Silicon this is 128 bytes;
+ * membench_get_cache_line_size() detects at runtime on macOS.
+ */
+#define CACHE_LINE_BYTES_DEFAULT 64
+
+#if defined(MEMBENCH_PLATFORM_MACOS)
+#include <sys/sysctl.h>
+#endif
+
+static size_t membench_get_cache_line_size(void) {
+#if defined(MEMBENCH_PLATFORM_MACOS)
+    size_t line = 0, sz = sizeof(line);
+    if (sysctlbyname("hw.cachelinesize", &line, &sz, NULL, 0) == 0 && line > 0)
+        return line;
+#endif
+    return CACHE_LINE_BYTES_DEFAULT;
+}
+
 /** How many void-pointers fit in one cache line */
-#define PTRS_PER_LINE    (CACHE_LINE_BYTES / sizeof(void *))   /* 8 on 64-bit */
+#define PTRS_PER_LINE_DEFAULT (CACHE_LINE_BYTES_DEFAULT / sizeof(void *))   /* 8 on 64-bit */
 
 /* ── Pointer-chase setup (cache-line stride) ──────────────────────────────── */
 
@@ -33,7 +51,7 @@
  * Node i lives at buf[i * PTRS_PER_LINE].
  * The chain visits every node exactly once.
  */
-static void build_pointer_chase_cl(void **buf, size_t node_count) {
+static void build_pointer_chase_cl(void **buf, size_t node_count, size_t ptrs_per_line) {
     /* Fisher-Yates shuffle of node indices → random Hamiltonian cycle */
     size_t *idx = (size_t *)malloc(node_count * sizeof(size_t));
     if (!idx) return;
@@ -46,9 +64,9 @@ static void build_pointer_chase_cl(void **buf, size_t node_count) {
     }
 
     for (size_t i = 0; i < node_count - 1; i++) {
-        buf[idx[i] * PTRS_PER_LINE] = (void *)&buf[idx[i + 1] * PTRS_PER_LINE];
+        buf[idx[i] * ptrs_per_line] = (void *)&buf[idx[i + 1] * ptrs_per_line];
     }
-    buf[idx[node_count - 1] * PTRS_PER_LINE] = (void *)&buf[idx[0] * PTRS_PER_LINE];
+    buf[idx[node_count - 1] * ptrs_per_line] = (void *)&buf[idx[0] * ptrs_per_line];
 
     free(idx);
 }
@@ -87,21 +105,24 @@ MEMBENCH_INLINE void **chase_load(void **p) {
 
 int membench_cpu_read_latency(size_t buffer_size, uint64_t iterations,
                               membench_latency_result_t *result) {
-    if (!result || buffer_size < CACHE_LINE_BYTES) return -1;
+    size_t cl = membench_get_cache_line_size();
+    size_t ptrs_per_line = cl / sizeof(void *);
+
+    if (!result || buffer_size < cl) return -1;
 
     /* Number of cache-line-spaced nodes that fit in the buffer */
-    size_t node_count = buffer_size / CACHE_LINE_BYTES;
+    size_t node_count = buffer_size / cl;
     if (node_count < 2) node_count = 2;
 
-    /* Allocate the full array (node_count * PTRS_PER_LINE pointers) */
-    size_t alloc_elems = node_count * PTRS_PER_LINE;
+    /* Allocate the full array (node_count * ptrs_per_line pointers) */
+    size_t alloc_elems = node_count * ptrs_per_line;
     void **buf = (void **)membench_alloc(alloc_elems * sizeof(void *));
     if (!buf) return -1;
 
     /* Zero-fill, then build the cache-line-stride chase */
     memset(buf, 0, alloc_elems * sizeof(void *));
     srand(42);
-    build_pointer_chase_cl(buf, node_count);
+    build_pointer_chase_cl(buf, node_count, ptrs_per_line);
 
     /* Warmup: one full traversal */
     {
@@ -156,19 +177,22 @@ int membench_cpu_read_latency(size_t buffer_size, uint64_t iterations,
  */
 int membench_cpu_write_latency(size_t buffer_size, uint64_t iterations,
                                membench_latency_result_t *result) {
-    if (!result || buffer_size < CACHE_LINE_BYTES) return -1;
+    size_t cl = membench_get_cache_line_size();
+    size_t ptrs_per_line = cl / sizeof(void *);
 
-    size_t node_count = buffer_size / CACHE_LINE_BYTES;
+    if (!result || buffer_size < cl) return -1;
+
+    size_t node_count = buffer_size / cl;
     if (node_count < 2) node_count = 2;
 
-    size_t alloc_elems = node_count * PTRS_PER_LINE;
+    size_t alloc_elems = node_count * ptrs_per_line;
     void **buf = (void **)membench_alloc(alloc_elems * sizeof(void *));
     if (!buf) return -1;
 
     /* Build cache-line-stride chase */
     memset(buf, 0, alloc_elems * sizeof(void *));
     srand(42);
-    build_pointer_chase_cl(buf, node_count);
+    build_pointer_chase_cl(buf, node_count, ptrs_per_line);
 
     /* Warmup */
     {

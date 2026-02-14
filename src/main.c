@@ -11,6 +11,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#if defined(MEMBENCH_PLATFORM_MACOS)
+#include <sys/sysctl.h>
+#endif
+
+/* ── CPU frequency warmup ─────────────────────────────────────────────────── */
+
+/**
+ * Busy-loop for ~200 ms to force the CPU out of low-power idle states.
+ * Without this, the first benchmark runs at a reduced clock frequency
+ * (e.g. ~1 GHz on Apple M1 instead of 3.2 GHz), inflating results ~3×.
+ */
+static void cpu_freq_warmup(void) {
+    uint64_t start = membench_timer_ns();
+    volatile uint64_t sink = 0;
+    while (membench_timer_ns() - start < 200000000ULL) { /* 200 ms */
+        for (int i = 0; i < 10000; i++) {
+            sink += (uint64_t)i * 37;
+        }
+    }
+    (void)sink;
+}
+
 /* ── Default test parameters ──────────────────────────────────────────────── */
 
 /* Buffer sizes for latency sweep (when no --size given) */
@@ -63,9 +85,22 @@ static const size_t DEFAULT_GPU_LAT_SIZES[] = {
 #define NUM_DEFAULT_GPU_LAT_SIZES \
     (sizeof(DEFAULT_GPU_LAT_SIZES) / sizeof(DEFAULT_GPU_LAT_SIZES[0]))
 
-/* Auto-pick iterations: target ~200ms per measurement */
+/* Auto-pick iterations: target ~200ms per measurement.
+ * For latency tests, element count must match the pointer-chase node count
+ * (buffer_size / cache_line_size), not buffer_size / sizeof(void*). */
+static size_t get_cache_line_size_main(void) {
+#if defined(MEMBENCH_PLATFORM_MACOS)
+    size_t line = 0, sz = sizeof(line);
+    if (sysctlbyname("hw.cachelinesize", &line, &sz, NULL, 0) == 0 && line > 0)
+        return line;
+#endif
+    return 64;
+}
+
 static uint64_t auto_iter(size_t buffer_size, int is_latency) {
-    size_t elems = buffer_size / sizeof(void *);
+    size_t elems = is_latency
+                   ? buffer_size / get_cache_line_size_main()
+                   : buffer_size / sizeof(void *);
     if (elems == 0) elems = 1;
     uint64_t target = is_latency ? 20000000ULL : 5000000ULL;
     uint64_t iters = target / elems;
@@ -113,6 +148,12 @@ static int run_cpu(const membench_options_t *opts) {
     }
 
     if (opts->tests & MEMBENCH_TEST_BANDWIDTH) {
+        /* Determine RAM limit: skip sizes >= 50% of physical RAM to avoid
+         * measuring swap performance instead of DRAM. */
+        membench_sysinfo_t si = {0};
+        membench_sysinfo_get(&si);
+        size_t ram_limit = si.total_ram > 0 ? si.total_ram / 2 : (size_t)-1;
+
         printf("\n=== CPU Read Bandwidth ===\n");
         if (opts->buffer_size) {
             membench_bandwidth_result_t r = {0};
@@ -122,6 +163,12 @@ static int run_cpu(const membench_options_t *opts) {
             if (rc == 0) membench_print_bandwidth(&r, "Read BW", opts->format);
         } else {
             for (size_t i = 0; i < NUM_DEFAULT_BW_SIZES; i++) {
+                if (DEFAULT_BW_SIZES[i] >= ram_limit) {
+                    printf("  (skipping %.1f GB+ — exceeds 50%% of %.1f GB RAM)\n",
+                           (double)DEFAULT_BW_SIZES[i] / (1024.0*1024.0*1024.0),
+                           (double)si.total_ram / (1024.0*1024.0*1024.0));
+                    break;
+                }
                 membench_bandwidth_result_t r = {0};
                 uint64_t iters = auto_iter(DEFAULT_BW_SIZES[i], 0);
                 rc = membench_cpu_read_bandwidth(DEFAULT_BW_SIZES[i], iters, &r);
@@ -138,6 +185,12 @@ static int run_cpu(const membench_options_t *opts) {
             if (rc == 0) membench_print_bandwidth(&r, "Write BW", opts->format);
         } else {
             for (size_t i = 0; i < NUM_DEFAULT_BW_SIZES; i++) {
+                if (DEFAULT_BW_SIZES[i] >= ram_limit) {
+                    printf("  (skipping %.1f GB+ — exceeds 50%% of %.1f GB RAM)\n",
+                           (double)DEFAULT_BW_SIZES[i] / (1024.0*1024.0*1024.0),
+                           (double)si.total_ram / (1024.0*1024.0*1024.0));
+                    break;
+                }
                 membench_bandwidth_result_t r = {0};
                 uint64_t iters = auto_iter(DEFAULT_BW_SIZES[i], 0);
                 rc = membench_cpu_write_bandwidth(DEFAULT_BW_SIZES[i], iters, &r);
@@ -246,6 +299,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Failed to initialize high-resolution timer\n");
         return 1;
     }
+
+    /* Warm up CPU to stabilize clock frequency before benchmarking */
+    cpu_freq_warmup();
 
     /* Print system info */
     membench_sysinfo_t sinfo = {0};

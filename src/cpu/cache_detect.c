@@ -41,6 +41,9 @@
 #elif defined(MEMBENCH_PLATFORM_LINUX)
     #define _GNU_SOURCE
     #include <sched.h>
+#elif defined(MEMBENCH_PLATFORM_MACOS)
+    #include <pthread.h>
+    #include <sys/sysctl.h>
 #endif
 
 /* ── Test sizes: logarithmic sweep from 1 KB to 512 MB ───────────────────── */
@@ -78,10 +81,20 @@ static size_t generate_sizes(size_t **out_sizes) {
 /**
  * Auto-iteration count: ensure enough total accesses so wall-clock time
  * is well above timer granularity. For cache detection we use cache-line
- * stride nodes, so count = buffer_size / 64.
+ * stride nodes, so count = buffer_size / cache_line_size.
  */
+static size_t get_cache_line_size_cd(void) {
+#if defined(MEMBENCH_PLATFORM_MACOS)
+    size_t line = 0, sz = sizeof(line);
+    if (sysctlbyname("hw.cachelinesize", &line, &sz, NULL, 0) == 0 && line > 0)
+        return line;
+#endif
+    return 64;
+}
+
 static uint64_t auto_iterations(size_t buffer_size) {
-    size_t nodes = buffer_size / 64;   /* cache-line stride */
+    size_t cl = get_cache_line_size_cd();
+    size_t nodes = buffer_size / cl;
     if (nodes == 0) nodes = 1;
     /*
      * Target ~100 million node-visits per measurement.
@@ -329,6 +342,10 @@ int membench_cpu_detect_cache(membench_cache_info_t *info) {
     CPU_SET(0, &new_mask);
     sched_getaffinity(0, sizeof(old_mask), &old_mask);
     sched_setaffinity(0, sizeof(new_mask), &new_mask);
+#elif defined(MEMBENCH_PLATFORM_MACOS)
+    /* macOS has no POSIX thread affinity.  Request high-priority QoS class
+     * to encourage scheduling on P-cores rather than E-cores. */
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #endif
 
     printf("  Sweeping %zu buffer sizes from %zu KB to %zu MB...\n",
@@ -346,11 +363,13 @@ int membench_cpu_detect_cache(membench_cache_info_t *info) {
         latencies[i] = lat.avg_latency_ns;
     }
 
-    /* Restore original thread affinity */
+    /* Restore original thread affinity / QoS */
 #if defined(MEMBENCH_PLATFORM_WINDOWS)
     if (old_affinity) SetThreadAffinityMask(GetCurrentThread(), old_affinity);
 #elif defined(MEMBENCH_PLATFORM_LINUX)
     sched_setaffinity(0, sizeof(old_mask), &old_mask);
+#elif defined(MEMBENCH_PLATFORM_MACOS)
+    pthread_set_qos_class_self_np(QOS_CLASS_DEFAULT, 0);
 #endif
 
     detect_boundaries(sizes, latencies, num, info);
