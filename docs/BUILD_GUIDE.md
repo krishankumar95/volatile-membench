@@ -30,11 +30,13 @@ Step-by-step instructions for building on Windows, Linux, and macOS.
 | Tool | Required | Minimum Version | Notes |
 |------|----------|----------------|-------|
 | CMake | **Yes** | 3.20 | Build system generator |
-| C Compiler | **Yes** | C11 support | MSVC 2019+, GCC 9+, Clang 11+ |
+| C Compiler | **Yes** | C11 support | MSVC 2019+, GCC 9+, Clang 11+, Apple Clang |
 | Git | Recommended | Any | Cloning the repo |
 | CUDA Toolkit | Optional | 11.0+ | NVIDIA GPU benchmarks |
 | ROCm / HIP | Optional | 5.0+ | AMD GPU benchmarks (Linux only) |
 | Ninja | Optional | Any | Faster parallel builds |
+
+**Supported architectures**: x86_64 and ARM64 (Apple Silicon, Linux aarch64). Architecture is auto-detected by CMake.
 
 ### Checking Your Environment
 
@@ -170,6 +172,8 @@ cmake --build build
 ```
 
 > **Note**: macOS has no CUDA support. GPU benchmarks are automatically disabled and a stub library is linked instead.
+
+> **Apple Silicon (M1/M2/M3/M4)**: ARM64 architecture is auto-detected. The benchmark automatically detects the 128-byte cache line size (vs 64 bytes on x86) via `sysctl` and adjusts pointer-chase stride accordingly. System information reports P-core (high-performance) cache sizes by default.
 
 ---
 
@@ -389,15 +393,17 @@ cmake --build build-debug --config Debug
 
 ## Makefile Shortcuts
 
-For convenience, a `Makefile` wraps common operations:
+For convenience, a `Makefile` in the project root wraps common operations:
 
 | Command | What It Does |
 |---------|-------------|
 | `make setup` | Full setup: install deps + configure + build + test |
 | `make setup-minimal` | Install required deps only, skip GPU/Ninja |
 | `make build` | Configure (default preset) + build |
+| `make build-release` | Configure (release preset) + build |
+| `make build-debug` | Configure (debug preset) + build |
 | `make build-cpu` | Configure (no-gpu preset) + build |
-| `make test` | Run CTest in the build directory |
+| `make test` | Build + run CTest |
 | `make clean` | Remove all build directories |
 | `make help` | Show available commands |
 
@@ -468,20 +474,28 @@ Not currently supported. The benchmarks are designed to run on the same machine 
 
 After a successful build:
 
+**Linux / macOS (single-config generators — Make, Ninja):**
 ```
 build/
 ├── src/
-│   └── RelWithDebInfo/           # (Windows — MSVC multi-config)
+│   └── membench                  # Main executable
+└── tests/
+    ├── test_timer
+    ├── test_alloc
+    └── test_sysinfo
+```
+
+**Windows (multi-config generators — MSVC):**
+```
+build/
+├── src/
+│   └── RelWithDebInfo/
 │       └── membench.exe          # Main executable
-│   └── membench                  # (Linux/macOS — single-config)
-├── tests/
-│   └── RelWithDebInfo/           # (Windows)
-│       ├── test_timer.exe
-│       ├── test_alloc.exe
-│       └── test_sysinfo.exe
-│   ├── test_timer                # (Linux/macOS)
-│   ├── test_alloc
-│   └── test_sysinfo
+└── tests/
+    └── RelWithDebInfo/
+        ├── test_timer.exe
+        ├── test_alloc.exe
+        └── test_sysinfo.exe
 ```
 
 The main executable is self-contained. Copy `membench` (or `membench.exe`) to any directory and run it. No additional files or libraries are needed at runtime (CUDA runtime is statically linked).
