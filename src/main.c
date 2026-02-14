@@ -220,8 +220,8 @@ static int run_gpu(const membench_options_t *opts) {
 
     printf("\n=== GPU Information ===\n");
     if (membench_gpu_get_info(dev, &ginfo) != 0) {
-        fprintf(stderr, "Failed to get GPU info for device %d\n", dev);
-        return -1;
+        printf("  Skipped — no GPU support (compiled without CUDA/HIP)\n");
+        return 0;
     }
     membench_print_gpu_info(&ginfo, opts->format);
 
