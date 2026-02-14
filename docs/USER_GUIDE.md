@@ -483,7 +483,7 @@ GPU pointer-chase latency is inherently slow for large buffers. Default sizes ar
 
 ### Build issues
 
-See the [Build Guide](BUILD_GUIDE.md) for detailed platform-specific instructions, or run the setup scripts:
+See the [Build Troubleshooting Guide](BUILD_TROUBLESHOOTING.md) for detailed platform-specific instructions, or run the setup scripts:
 
 ```bash
 # Linux / macOS

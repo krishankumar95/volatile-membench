@@ -186,7 +186,7 @@ volatile-membench/
 | Document | What's in it |
 |----------|-------------|
 | [User Guide](docs/USER_GUIDE.md) | CLI reference, all flags, examples, troubleshooting |
-| [Build Guide](docs/BUILD_GUIDE.md) | Platform-specific build instructions, Apple Silicon notes |
+| [Build Troubleshooting](docs/BUILD_TROUBLESHOOTING.md) | Platform-specific build instructions, GPU SDK setup, CMake options |
 | [Results](docs/RESULTS.md) | M1 vs 5800X3D benchmark data with analysis |
 | [Key Learnings](docs/KEY_LEARNINGS.md) | 18 sections on memory walls, volatile semantics, prefetcher defeat, cache detection signal processing |
 

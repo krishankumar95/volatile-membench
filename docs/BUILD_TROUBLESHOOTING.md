@@ -1,6 +1,6 @@
-# Building Volatile MemBench
+# Build Troubleshooting Guide
 
-Step-by-step instructions for building on Windows, Linux, and macOS.
+Platform-specific build instructions, GPU SDK setup, CMake options, and solutions for common build issues.
 
 ---
 
@@ -307,7 +307,7 @@ cmake --preset no-gpu
 cmake --build build-cpu
 ```
 
-The build links a stub GPU library that returns error codes for all GPU functions. The `--target gpu` flag will report "Failed to get GPU info" at runtime.
+The build links a stub GPU library. The `--target gpu` flag will print "Skipped — no GPU support (compiled without CUDA/HIP)" and continue normally.
 
 ---
 
