@@ -285,13 +285,19 @@ static int run_gpu(const membench_options_t *opts) {
 int main(int argc, char **argv) {
     membench_options_t opts = {0};
 
-    if (membench_cli_parse(argc, argv, &opts) != 0) {
-        membench_cli_usage(argv[0]);
-        return 1;
-    }
-    if (opts.show_help) {
-        membench_cli_usage(argv[0]);
-        return 0;
+    if (argc == 1) {
+        /* No arguments — try interactive mode */
+        if (membench_cli_interactive(&opts) != 0)
+            return 0; /* user cancelled */
+    } else {
+        if (membench_cli_parse(argc, argv, &opts) != 0) {
+            membench_cli_usage(argv[0]);
+            return 1;
+        }
+        if (opts.show_help) {
+            membench_cli_usage(argv[0]);
+            return 0;
+        }
     }
 
     /* Initialize timer */

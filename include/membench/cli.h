@@ -52,6 +52,12 @@ int membench_cli_parse(int argc, char **argv, membench_options_t *opts);
  */
 void membench_cli_usage(const char *progname);
 
+/**
+ * Interactive mode: present arrow-key navigable menus for all options.
+ * Only works when stdin is a TTY. Returns 0 on success, -1 on cancel/error.
+ */
+int membench_cli_interactive(membench_options_t *opts);
+
 #ifdef __cplusplus
 }
 #endif

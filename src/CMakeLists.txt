@@ -6,6 +6,7 @@ add_library(membench_core STATIC
     core/alloc.c
     core/sysinfo.c
     core/cli.c
+    core/cli_interactive.c
     core/output.c
 )
 target_include_directories(membench_core PUBLIC
