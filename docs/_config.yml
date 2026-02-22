@@ -1,0 +1,14 @@
+title: Volatile MemBench
+description: Cross-platform memory benchmarking tool — cache latency, DRAM bandwidth, and hierarchy detection down to the nanosecond.
+baseurl: "/volatile-membench"
+url: "https://krishankumar95.github.io"
+remote_theme: pages-themes/minimal@v0.2.0
+
+exclude:
+  - USER_GUIDE.md
+  - BUILD_TROUBLESHOOTING.md
+  - KEY_LEARNINGS.md
+  - RESULTS.md
+
+plugins:
+  - jekyll-remote-theme
